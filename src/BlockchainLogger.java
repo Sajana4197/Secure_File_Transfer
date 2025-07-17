@@ -1,33 +1,67 @@
-import java.io.*;
-import java.util.*;
+// BlockchainLogger.java
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 
 public class BlockchainLogger {
-    private static final String CHAIN_FILE = "blockchain.txt";
 
-    public void logBlock(String fileHash, String timestamp, String nonce) throws Exception {
-        String prevHash = getLastBlockHash();
-        Block newBlock = new Block(fileHash, timestamp, nonce, prevHash);
+    // Simple blockchain block structure
+    static class Block {
+        String fileHash;
+        long timestamp;
+        String nonce;
+        String flowId;
+        String previousHash;
+        String currentHash;
 
-        FileWriter fw = new FileWriter(CHAIN_FILE, true);
-        fw.write(newBlock.toString() + "\n\n");
-        fw.close();
-
-        // Print full block to console
-        System.out.println("[Blockchain] Block successfully logged:");
-        System.out.println(newBlock.toString());
+        Block(String fileHash, long timestamp, String nonce, String flowId, String previousHash, String currentHash) {
+            this.fileHash = fileHash;
+            this.timestamp = timestamp;
+            this.nonce = nonce;
+            this.flowId = flowId;
+            this.previousHash = previousHash;
+            this.currentHash = currentHash;
+        }
     }
 
-    private String getLastBlockHash() throws Exception {
-        File file = new File(CHAIN_FILE);
-        if (!file.exists() || file.length() == 0)
-            return "0";  // Genesis block previous hash
+    private static List<Block> blockchain = new ArrayList<>();
 
-        List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
-        for (int i = lines.size() - 1; i >= 0; i--) {
-            if (lines.get(i).trim().startsWith("\"currentHash\":")) {
-                return lines.get(i).split(":")[1].trim().replace("\"", "").replace(",", "");
+    // Method to log a new block with flowId included
+    public static void logBlock(String fileHash, long timestamp, String nonce, String flowId) {
+        String previousHash = blockchain.isEmpty() ? "0" : blockchain.get(blockchain.size() - 1).currentHash;
+
+        // Prepare block data string for hashing
+        String dataToHash = fileHash + timestamp + nonce + flowId + previousHash;
+        String currentHash = sha256(dataToHash);
+
+        Block newBlock = new Block(fileHash, timestamp, nonce, flowId, previousHash, currentHash);
+        blockchain.add(newBlock);
+
+        System.out.println("[Blockchain] Block successfully logged:");
+        System.out.println("{");
+        System.out.println("  \"fileHash\": \"" + fileHash + "\",");
+        System.out.println("  \"timestamp\": \"" + timestamp + "\",");
+        System.out.println("  \"nonce\": \"" + nonce + "\",");
+        System.out.println("  \"flowId\": \"" + flowId + "\",");
+        System.out.println("  \"previousHash\": \"" + previousHash + "\",");
+        System.out.println("  \"currentHash\": \"" + currentHash + "\"");
+        System.out.println("}");
+    }
+
+    // SHA-256 hashing helper method
+    private static String sha256(String data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(data.getBytes("UTF-8"));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if(hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
             }
+            return hexString.toString();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-        return "0";
     }
 }

@@ -56,4 +56,19 @@ public class CryptoUtils {
         signature.update(data);
         return signature.verify(sig);
     }
+    
+    public static byte[] signData(byte[] data, PrivateKey privateKey) throws Exception {
+        Signature signature = Signature.getInstance("SHA256withRSA");
+        signature.initSign(privateKey);
+        signature.update(data);
+        return signature.sign();
+    }
+    
+    public static boolean verifySignature(byte[] data, byte[] signature, PublicKey publicKey) throws Exception {
+        Signature sig = Signature.getInstance("SHA256withRSA");
+        sig.initVerify(publicKey);
+        sig.update(data);
+        return sig.verify(signature);
+    }
+
 }

@@ -1,82 +1,78 @@
-import javax.crypto.SecretKey;
+import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.security.*;
-import java.util.Base64;
+import java.util.*;
 
 public class SecureFileReceiver {
-    private KeyPair receiverKeyPair;
-    private PublicKey senderPublicKey;
+    private PrivateKey receiverPrivateKey;
+    private PublicKey receiverPublicKey;
+    private UUID flowId;
 
-    // Constructor accepts sender's public key for signature verification
-    public SecureFileReceiver(PublicKey senderPublicKey) throws Exception {
-        this.senderPublicKey = senderPublicKey;
+    public SecureFileReceiver() throws Exception {
+        generateRSAKeys();
+    }
+
+    private void generateRSAKeys() throws Exception {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
         keyGen.initialize(2048);
-        receiverKeyPair = keyGen.generateKeyPair();
-
+        KeyPair keyPair = keyGen.generateKeyPair();
+        receiverPrivateKey = keyPair.getPrivate();
+        receiverPublicKey = keyPair.getPublic();
         System.out.println("[Receiver] RSA Key Pair Generated.");
-        System.out.println("[Receiver] Public Key: " + Base64.getEncoder().encodeToString(receiverKeyPair.getPublic().getEncoded()));
-        System.out.println("[Receiver] Private Key: " + Base64.getEncoder().encodeToString(receiverKeyPair.getPrivate().getEncoded()));
+        System.out.println("[Receiver] Public Key: " + Base64.getEncoder().encodeToString(receiverPublicKey.getEncoded()));
+        System.out.println("[Receiver] Private Key: " + Base64.getEncoder().encodeToString(receiverPrivateKey.getEncoded()));
     }
 
     public PublicKey getPublicKey() {
-        return receiverKeyPair.getPublic();
+        return receiverPublicKey;
     }
 
-    public void receiveMessage(byte[] message) throws Exception {
-        ByteArrayInputStream bais = new ByteArrayInputStream(message);
-        ObjectInputStream ois = new ObjectInputStream(bais);
-
+    public void receiveMessage(ObjectInputStream ois) throws Exception {
+        System.out.println("[Receiver] Message received. Processing...");
         byte[] encryptedFile = (byte[]) ois.readObject();
         byte[] encryptedAESKey = (byte[]) ois.readObject();
         byte[] fileHash = (byte[]) ois.readObject();
         byte[] signature = (byte[]) ois.readObject();
-        String nonce = (String) ois.readObject();
-        String timestamp = (String) ois.readObject();
-        ois.close();
+        UUID nonce = (UUID) ois.readObject();
+        long timestamp = ois.readLong();
+        PublicKey senderPublicKey = (PublicKey) ois.readObject();
+        String flowIdString = (String) ois.readObject();
+        this.flowId = UUID.fromString(flowIdString);
 
-        System.out.println("[Receiver] Message received. Processing...");
         System.out.println("[Receiver] Nonce: " + nonce);
         System.out.println("[Receiver] Timestamp: " + timestamp);
+        System.out.println("[Receiver] Flow ID: " + flowId);
 
-        // Decrypt AES key with receiver's private RSA key
-        byte[] aesKeyBytes = CryptoUtils.decryptRSA(encryptedAESKey, receiverKeyPair.getPrivate());
+        // Decrypt AES key
+        byte[] aesKeyBytes = CryptoUtils.decryptRSA(encryptedAESKey, receiverPrivateKey);
         SecretKey aesKey = new SecretKeySpec(aesKeyBytes, 0, aesKeyBytes.length, "AES");
         System.out.println("[Receiver] Decrypted AES key.");
 
-        // Decrypt file with AES key
-        byte[] decryptedFile = CryptoUtils.decryptAES(encryptedFile, aesKey);
+        // Decrypt file
+        byte[] fileContent = CryptoUtils.decryptAES(encryptedFile, aesKey);
         System.out.println("[Receiver] Decrypted file content.");
 
-        // Compute hash of decrypted file
-        byte[] computedHash = CryptoUtils.hashSHA256(decryptedFile);
+        // Verify hash
+        byte[] computedHash = CryptoUtils.hashSHA256(fileContent);
         System.out.println("[Receiver] Computed hash: " + Base64.getEncoder().encodeToString(computedHash));
-
-        // Compare received hash and recomputed hash
-        if (MessageDigest.isEqual(fileHash, computedHash)) {
+        if (Arrays.equals(fileHash, computedHash)) {
             System.out.println("[Receiver] File hash matches ✓");
         } else {
-            System.out.println("[Receiver] File hash mismatch ✗ — Possible tampering");
+            System.out.println("[Receiver] File hash mismatch ✗");
         }
 
-        // Verify signature with sender's public key
-        boolean verified = CryptoUtils.verify(computedHash, signature, senderPublicKey);
-        System.out.println("[Receiver] Signature valid? " + verified);
+        // Verify signature
+        boolean isValid = CryptoUtils.verifySignature(fileHash, signature, senderPublicKey);
+        System.out.println("[Receiver] Signature valid? " + isValid);
 
-        // Save the decrypted file locally
-        FileOutputStream fos = new FileOutputStream("received_file.txt");
-        fos.write(decryptedFile);
-        fos.close();
+        // Save file
+        Files.write(Paths.get("received_file.txt"), fileContent);
         System.out.println("[Receiver] File saved: received_file.txt");
 
         // Log to blockchain
-        BlockchainLogger logger = new BlockchainLogger();
-        logger.logBlock(
-            Base64.getEncoder().encodeToString(computedHash), 
-            timestamp,
-            nonce
-        );
-
+        BlockchainLogger.logBlock(Base64.getEncoder().encodeToString(fileHash), timestamp, nonce.toString(), flowId.toString());
     }
 }

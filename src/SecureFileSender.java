@@ -1,85 +1,85 @@
-import javax.crypto.SecretKey;
+import javax.crypto.*;
 import java.io.*;
+import java.nio.file.*;
 import java.security.*;
-import java.util.Base64;
+import java.util.*;
 
 public class SecureFileSender {
-    private KeyPair senderKeyPair;
     private PublicKey receiverPublicKey;
+    private PrivateKey senderPrivateKey;
+    private PublicKey senderPublicKey;
+    private UUID flowId;
 
-    // No-argument constructor generates sender's RSA key pair
-    public SecureFileSender() throws Exception {
-    	KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-        keyGen.initialize(2048);
-        senderKeyPair = keyGen.generateKeyPair();
-
-        System.out.println("[Sender] RSA Key Pair Generated.");
-        System.out.println("[Sender] Public Key: " + Base64.getEncoder().encodeToString(senderKeyPair.getPublic().getEncoded()));
-        System.out.println("[Sender] Private Key: " + Base64.getEncoder().encodeToString(senderKeyPair.getPrivate().getEncoded()));
-    }
-
-    // Set receiver's public key so sender can encrypt AES key
-    public void setReceiverPublicKey(PublicKey receiverPublicKey) {
+    public SecureFileSender(PublicKey receiverPublicKey) throws Exception {
         this.receiverPublicKey = receiverPublicKey;
+        generateRSAKeys();
+        this.flowId = UUID.randomUUID();
+        System.out.println("[Sender] Flow ID: " + flowId);
     }
 
-    public PublicKey getSenderPublicKey() {
-        return senderKeyPair.getPublic();
+    public PublicKey getPublicKey() {
+        return senderPublicKey;
     }
 
-    public byte[] prepareMessage(String filePath) throws Exception {
-        if (receiverPublicKey == null) {
-            throw new IllegalStateException("Receiver's public key is not set!");
-        }
+    public PrivateKey getPrivateKey() {
+        return senderPrivateKey;
+    }
 
-        // Read file bytes
-        byte[] fileData = readFile(filePath);
+    private void generateRSAKeys() throws Exception {
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+        keyGen.initialize(2048);
+        KeyPair keyPair = keyGen.generateKeyPair();
+        senderPrivateKey = keyPair.getPrivate();
+        senderPublicKey = keyPair.getPublic();
+        System.out.println("[Sender] RSA Key Pair Generated.");
+        System.out.println("[Sender] Public Key: " + Base64.getEncoder().encodeToString(senderPublicKey.getEncoded()));
+        System.out.println("[Sender] Private Key: " + Base64.getEncoder().encodeToString(senderPrivateKey.getEncoded()));
+    }
+
+    public void prepareMessage(String filePath, ObjectOutputStream oos) throws Exception {
+        byte[] fileContent = readFile(filePath);
         System.out.println("[Sender] Read file: " + filePath);
 
-        // Generate AES symmetric key
-        SecretKey aesKey = CryptoUtils.generateAESKey();
+        // Generate AES Key
+        KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+        keyGen.init(128);
+        SecretKey aesKey = keyGen.generateKey();
         System.out.println("[Sender] Generated AES Key: " + Base64.getEncoder().encodeToString(aesKey.getEncoded()));
 
-        // Encrypt file with AES key
-        byte[] encryptedFile = CryptoUtils.encryptAES(fileData, aesKey);
+        // Encrypt the file
+        byte[] encryptedFile = CryptoUtils.encryptAES(fileContent, aesKey);
         System.out.println("[Sender] Encrypted File.");
 
-        // Hash file
-        byte[] fileHash = CryptoUtils.hashSHA256(fileData);
+        // Compute hash
+        byte[] fileHash = CryptoUtils.hashSHA256(fileContent);
         System.out.println("[Sender] File SHA-256 Hash: " + Base64.getEncoder().encodeToString(fileHash));
 
-        // Sign the hash with sender's private RSA key
-        byte[] signature = CryptoUtils.sign(fileHash, senderKeyPair.getPrivate());
+        // Sign the hash
+        byte[] signature = CryptoUtils.signData(fileHash, senderPrivateKey);
         System.out.println("[Sender] Signed file hash.");
 
-        // Encrypt AES key with receiver's public RSA key
+        // Encrypt AES key with receiver's public key
         byte[] encryptedAESKey = CryptoUtils.encryptRSA(aesKey.getEncoded(), receiverPublicKey);
         System.out.println("[Sender] Encrypted AES key with Receiver's public key.");
 
-        // Generate nonce and timestamp for replay protection
-        String nonce = java.util.UUID.randomUUID().toString();
-        String timestamp = String.valueOf(System.currentTimeMillis());
+        // Nonce & Timestamp
+        UUID nonce = UUID.randomUUID();
+        long timestamp = System.currentTimeMillis();
 
-        // Serialize message parts into a byte array
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-
+        // Send data
+        System.out.println("[Sender] Message ready. Sending...");
         oos.writeObject(encryptedFile);
         oos.writeObject(encryptedAESKey);
         oos.writeObject(fileHash);
         oos.writeObject(signature);
         oos.writeObject(nonce);
-        oos.writeObject(timestamp);
-
+        oos.writeLong(timestamp);
+        oos.writeObject(senderPublicKey);
+        oos.writeObject(flowId.toString());
         oos.flush();
-        byte[] message = baos.toByteArray();
-        oos.close();
-
-        System.out.println("[Sender] Message ready. Sending...");
-        return message;
     }
 
-    private byte[] readFile(String filePath) throws IOException {
-        return java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath));
+    private byte[] readFile(String path) throws IOException {
+        return Files.readAllBytes(Paths.get(path));
     }
 }

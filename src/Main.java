@@ -1,27 +1,40 @@
+// Main.java
+import java.io.*;
+import java.security.PublicKey;
 import java.util.Scanner;
 
 public class Main {
-    public static void main(String[] args) throws Exception {
-        Scanner scanner = new Scanner(System.in);
+    public static void main(String[] args) {
+        try {
+            // Initialize Receiver
+            SecureFileReceiver receiver = new SecureFileReceiver();
+            PublicKey receiverPublicKey = receiver.getPublicKey();
 
-        // Ask user for input file path
-        System.out.print("Enter the path of the file to send: ");
-        String filePath = scanner.nextLine().replaceAll("^\"|\"$", "").trim();
+            // Initialize Sender with receiver's public key
+            SecureFileSender sender = new SecureFileSender(receiverPublicKey);
 
-        // Sender and Receiver setup
-        SecureFileSender sender = new SecureFileSender();
-        SecureFileReceiver receiver = new SecureFileReceiver(sender.getSenderPublicKey());
+            // Ask user for file path
+            Scanner scanner = new Scanner(System.in);
+            System.out.print("Enter the path of the file to send: ");
+            String filePath = scanner.nextLine().replaceAll("^\"|\"$", "").trim();
 
-        sender.setReceiverPublicKey(receiver.getPublicKey());
+            // Use ByteArrayOutputStream for simulation
+            ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(byteOut);
 
-        // Send and receive file
-        byte[] message = sender.prepareMessage(filePath);
-        receiver.receiveMessage(message);
+            sender.prepareMessage(filePath, oos);
 
-        // Validate blockchain
-        BlockchainValidator validator = new BlockchainValidator();
-        validator.validateBlockchain();
+            byte[] messageBytes = byteOut.toByteArray();
+            ByteArrayInputStream byteIn = new ByteArrayInputStream(messageBytes);
+            ObjectInputStream ois = new ObjectInputStream(byteIn);
 
-        scanner.close();
+            receiver.receiveMessage(ois);
+
+            oos.close();
+            ois.close();
+            scanner.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }
